@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Edana Schools – Login</title>
+<style>
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+    background: linear-gradient(135deg, #f8fafc 0%, #eff6ff 55%, #f1f5f9 100%);
+    display: flex; align-items: center; justify-content: center;
+    padding: 16px; box-sizing: border-box;
+  }
+  .card {
+    background: #ffffff; width: 100%; max-width: 430px;
+    border: 1px solid #e2e8f0; border-radius: 16px;
+    box-shadow: 0 20px 40px rgba(15, 55, 120, 0.12);
+    padding: 40px 36px 32px; box-sizing: border-box;
+  }
+  .logo { display: block; margin: 0 auto; width: 132px; height: 132px; border-radius: 50%; }
+  h1 { text-align: center; font-size: 27px; color: #0f172a; margin: 18px 0 4px; }
+  .subtitle { text-align: center; color: #475569; margin: 0 0 26px; font-size: 16px; }
+  label { display: block; font-weight: 600; color: #1e293b; margin: 18px 0 8px; font-size: 15px; }
+  .field { position: relative; }
+  .field svg.icon {
+    position: absolute; left: 13px; top: 50%; transform: translateY(-50%);
+    width: 19px; height: 19px; color: #94a3b8; pointer-events: none;
+  }
+  input {
+    width: 100%; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 9px;
+    padding: 13px 44px 13px 42px; font-size: 15px; color: #0f172a; outline: none;
+    transition: border-color .15s, box-shadow .15s; background: #ffffff;
+  }
+  input:focus { border-color: #0a4da8; box-shadow: 0 0 0 3px rgba(10, 77, 168, .18); }
+  .eye {
+    position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+    background: none; border: none; cursor: pointer; padding: 6px; color: #94a3b8;
+    display: flex; align-items: center;
+  }
+  .eye:hover { color: #334155; }
+  .eye svg { width: 20px; height: 20px; }
+  .forgot-row { text-align: right; margin-top: 12px; }
+  .forgot {
+    background: none; border: none; color: #0a4da8; font-weight: 600; font-size: 14.5px;
+    cursor: pointer; padding: 0;
+  }
+  .forgot:hover { text-decoration: underline; }
+  .forgot:disabled { opacity: .6; cursor: default; text-decoration: none; }
+  .signin {
+    width: 100%; margin-top: 22px; background: #0a4da8; color: #fff; border: none;
+    border-radius: 9px; padding: 14px; font-size: 15.5px; font-weight: 600; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; gap: 9px;
+    transition: background .15s;
+  }
+  .signin:hover { background: #083d86; }
+  .signin:disabled { opacity: .7; cursor: default; }
+  .spinner {
+    width: 16px; height: 16px; border-radius: 50%;
+    border: 2px solid rgba(255,255,255,.4); border-top-color: #fff;
+    animation: spin .7s linear infinite; display: none;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .msg {
+    display: none; border-radius: 9px; padding: 12px 14px; font-size: 14px; line-height: 1.5;
+    margin-bottom: 6px;
+  }
+  .msg.err { display: block; background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+  .msg.ok  { display: block; background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+  .note {
+    margin-top: 20px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 9px;
+    padding: 11px 14px; text-align: center; font-size: 13px; color: #64748b; line-height: 1.55;
+  }
+  .note b { color: #334155; }
+  .copy { text-align: center; font-size: 12px; color: #94a3b8; margin: 26px 0 0; }
+</style>
+</head>
+<body>
+
+  <form class="card" id="loginForm" novalidate>
+    <img class="logo" src="edana-logo.png" alt="Edana Schools logo" />
+
+    <p class="subtitle" style="margin-top:20px;font-size:18px;color:#334155;font-weight:600;">School Management System</p>
+
+    <div class="msg" id="msgBox"></div>
+
+    <label for="email">Email / Username</label>
+    <div class="field">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="2" y="4" width="20" height="16" rx="2" /><path d="m22 7-10 6L2 7" />
+      </svg>
+      <input type="email" id="email" placeholder="admin@example.com" autocomplete="email" required />
+    </div>
+
+    <label for="password">Password</label>
+    <div class="field">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
+      </svg>
+      <input type="password" id="password" placeholder="••••••••" autocomplete="current-password" required />
+      <button type="button" class="eye" id="togglePw" aria-label="Show password">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" />
+        </svg>
+      </button>
+    </div>
+
+    <div class="forgot-row">
+      <button type="button" class="forgot" id="forgotBtn">Forgot Password?</button>
+    </div>
+
+    <button type="submit" class="signin" id="signinBtn">
+      <span class="spinner" id="spinner"></span>
+      <span id="signinText">Sign In</span>
+    </button>
+
+    <p class="copy">© <span id="year"></span> · Built by: <b>D.Prince Learning Hub</b></p>
+  </form>
+
+  <!-- Supabase library -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    /* ================= CONFIG — edit these if needed ================= */
+    var SUPABASE_URL = "https://cehqwkzztmfmsqtylshc.supabase.co";
+    var SUPABASE_KEY = "sb_publishable_CEeNvHZZSx8zWaPUJ8nKlA_mkWjaPQ6";
+    var PORTAL_URL = "/";   // where users are sent after a successful login
+    /* ================================================================= */
+
+    var client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    var form = document.getElementById("loginForm");
+    var emailEl = document.getElementById("email");
+    var passwordEl = document.getElementById("password");
+    var msgBox = document.getElementById("msgBox");
+    var signinBtn = document.getElementById("signinBtn");
+    var signinText = document.getElementById("signinText");
+    var spinner = document.getElementById("spinner");
+    var forgotBtn = document.getElementById("forgotBtn");
+
+    document.getElementById("year").textContent = new Date().getFullYear();
+
+    // If already signed in, go straight to the portal
+    client.auth.getSession().then(function (result) {
+      if (result.data && result.data.session) {
+        window.location.href = PORTAL_URL;
+      }
+    });
+
+    function showMsg(type, text) {
+      msgBox.className = "msg " + type;
+      msgBox.textContent = text;
+    }
+    function hideMsg() {
+      msgBox.className = "msg";
+      msgBox.textContent = "";
+    }
+    function friendlyError(message) {
+      var m = (message || "").toLowerCase();
+      if (m.indexOf("invalid login credentials") !== -1)
+        return "Incorrect email or password. If you don't have an account, the Super Admin must create one for you.";
+      if (m.indexOf("email not confirmed") !== -1)
+        return "This account's email hasn't been confirmed yet. Please click the confirmation link in your inbox, then sign in.";
+      if (m.indexOf("failed to fetch") !== -1 || m.indexOf("network") !== -1)
+        return "Couldn't reach the server. Check your internet connection and try again.";
+      if (m.indexOf("invalid email") !== -1)
+        return "Please enter a valid email address.";
+      if (m.indexOf("rate limit") !== -1 || m.indexOf("too many") !== -1)
+        return "Too many attempts. Please wait a few minutes and try again.";
+      return message;
+    }
+    function setLoading(loading) {
+      signinBtn.disabled = loading;
+      spinner.style.display = loading ? "inline-block" : "none";
+      signinText.textContent = loading ? "Signing In…" : "Sign In";
+    }
+
+    // Show / hide password
+    document.getElementById("togglePw").addEventListener("click", function () {
+      var showing = passwordEl.type === "text";
+      passwordEl.type = showing ? "password" : "text";
+      this.setAttribute("aria-label", showing ? "Show password" : "Hide password");
+      this.style.color = showing ? "" : "#0a4da8";
+    });
+
+    // Sign in
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      hideMsg();
+      var email = emailEl.value.trim();
+      var password = passwordEl.value;
+      if (!email || !password) {
+        showMsg("err", "Please enter your email and password.");
+        return;
+      }
+      setLoading(true);
+      client.auth.signInWithPassword({ email: email, password: password })
+        .then(function (result) {
+          setLoading(false);
+          if (result.error) {
+            showMsg("err", friendlyError(result.error.message));
+          } else {
+            showMsg("ok", "Signed in successfully. Opening your dashboard…");
+            window.location.href = PORTAL_URL;
+          }
+        })
+        .catch(function () {
+          setLoading(false);
+          showMsg("err", "Couldn't reach the server. Check your internet connection and try again.");
+        });
+    });
+
+    // Forgot password
+    forgotBtn.addEventListener("click", function () {
+      hideMsg();
+      var email = emailEl.value.trim();
+      if (!email) {
+        showMsg("err", "Type your email in the box above first, then click Forgot Password.");
+        return;
+      }
+      forgotBtn.disabled = true;
+      forgotBtn.textContent = "Sending…";
+      client.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin + "/" })
+        .then(function (result) {
+          forgotBtn.disabled = false;
+          forgotBtn.textContent = "Forgot Password?";
+          if (result.error) showMsg("err", friendlyError(result.error.message));
+          else showMsg("ok", "Password reset link sent — check your email inbox.");
+        });
+    });
+  </script>
+</body>
+</html>
