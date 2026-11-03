@@ -47,7 +47,47 @@ export async function uploadStudentPassport(
   return updateError ? { error: updateError.message } : { path };
 }
 import type { ClassRoom, Student, Subject } from "../types";
-import { DEFAULT_CLASSES } from "./school";
+import { DEFAULT_CLASSES, SESSIONS, CURRENT_SESSION } from "./school";
+
+/* ------------------------------ Sessions ---------------------------------- */
+export interface SessionRow {
+  id: string;
+  name: string;
+  is_current: boolean;
+  created_at: string;
+}
+
+export async function fetchSessionRows(): Promise<SessionRow[]> {
+  const { data, error } = await supabase
+    .from("sessions")
+    .select("*")
+    .order("name", { ascending: true });
+  if (error) return [];
+  return (data ?? []) as SessionRow[];
+}
+
+/**
+ * Sessions from the database (managed by the Super Admin). Falls back to the
+ * built-in list if the sessions table is missing or empty, so the app never breaks.
+ */
+export function useSessions() {
+  const [rows, setRows] = useState<SessionRow[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const reload = useCallback(async () => {
+    setRows(await fetchSessionRows());
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  const sessionNames = rows.length ? rows.map((r) => r.name) : SESSIONS;
+  const currentSession =
+    rows.find((r) => r.is_current)?.name ??
+    (rows.length ? rows[rows.length - 1].name : CURRENT_SESSION);
+
+  return { rows, sessionNames, currentSession, loading, reload };
+}
 
 /**
  * Insert the standard class list (Reception 1 -> SS 3) into the database.

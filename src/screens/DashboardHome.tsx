@@ -6,8 +6,8 @@ import {
 } from "lucide-react";
 import { supabase } from "../supabase";
 import type { Profile, Student } from "../types";
-import { CURRENT_SESSION, formatMoney } from "../lib/school";
-import { useClasses, fetchMyChildren, className, fetchSignatureUrl, SIGNATURE_BUCKET, SIGNATURE_PATH } from "../lib/data";
+import { formatMoney } from "../lib/school";
+import { useClasses, fetchMyChildren, className, fetchSignatureUrl, SIGNATURE_BUCKET, SIGNATURE_PATH, useSessions } from "../lib/data";
 import { StatCard, Card, StudentAvatar, RoleBadge, Spinner, PageHeader, Banner, friendlyError } from "../components/ui";
 import type { PageKey } from "../layout/DashboardLayout";
 
@@ -96,6 +96,7 @@ export default function DashboardHome({
   profile: Profile;
   go: (p: PageKey) => void;
 }) {
+  const { currentSession } = useSessions();
   const isAdmin = profile.role === "super_admin" || profile.role === "admin";
   const isTeacher = profile.role === "teacher";
   const isParent = profile.role === "parent";
@@ -169,7 +170,7 @@ export default function DashboardHome({
     <div>
       <PageHeader
         title={`Welcome${firstName ? `, ${firstName}` : ""}`}
-        subtitle={`${CURRENT_SESSION} Session · Edana Schools — Raising to Greatness`}
+        subtitle={`${currentSession} Session · Edana Schools — Raising to Greatness`}
       />
 
       {loading ? (

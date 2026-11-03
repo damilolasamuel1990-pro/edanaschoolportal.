@@ -1,16 +1,16 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { BookOpen, Plus, Trash2, Save, Printer, ArrowLeft, Check, Pencil } from "lucide-react";
+import { BookOpen, Plus, Trash2, Save, Printer, ArrowLeft, Check, Pencil, Upload, Download } from "lucide-react";
 import { supabase } from "../supabase";
 import type { Profile, Student, Subject, ResultRow, ReportMeta } from "../types";
 import {
-  TERMS, SESSIONS, CURRENT_SESSION, GRADE_SCALE, gradeOf,
+  TERMS, GRADE_SCALE, gradeOf,
   AFFECTIVE_TRAITS, PSYCHOMOTOR_SKILLS, RATING_KEYS, rankMap, fullName, formatDate,
-  TEST_MAX, EXAM_MAX, splitScore,
+  TEST_MAX, EXAM_MAX, splitScore, parseScoreCSV, scoresFromCsv, SCORE_CSV_TEMPLATE,
 } from "../lib/school";
-import { useClasses, className, fetchStudents, fetchSubjects, fetchMyChildren, overallAverage, saveResultRows, fetchSignatureUrl, passportPublicUrl } from "../lib/data";
+import { useClasses, className, fetchStudents, fetchSubjects, fetchMyChildren, overallAverage, saveResultRows, fetchSignatureUrl, passportPublicUrl, useSessions, type ResultSaveRow } from "../lib/data";
 import {
   PageHeader, Card, Banner, Spinner, Field, fieldCls,
-  Avatar, EmptyState, friendlyError, Logo,
+  Avatar, EmptyState, friendlyError, Logo, Modal,
 } from "../components/ui";
 import type { PageKey } from "../layout/DashboardLayout";
 
@@ -171,6 +171,161 @@ export function SubjectsScreen({ profile }: { profile: Profile }) {
   );
 }
 
+/* --------------------------- Import scores (CSV) --------------------------- */
+/** Teachers/Admins: bulk-import Test/Exam scores into students' report cards. */
+function ScoreImportModal({
+  profile, session, onClose,
+}: {
+  profile: Profile;
+  session: string;
+  onClose: () => void;
+}) {
+  const [text, setText] = useState("");
+  const [csvRows, setCsvRows] = useState<ReturnType<typeof parseScoreCSV>>([]);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ type: "err" | "ok"; text: string } | null>(null);
+
+  const parse = (value: string) => { setText(value); setCsvRows(parseScoreCSV(value)); };
+
+  const onFile = async (file: File | undefined) => { if (file) parse(await file.text()); };
+
+  const downloadTemplate = () => {
+    const blob = new Blob([SCORE_CSV_TEMPLATE], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "edana-scores-template.csv"; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const doImport = async () => {
+    setBusy(true); setMsg(null);
+    const students = await fetchStudents();
+    const byAdmission = new Map(students.map((s) => [s.admission_no.trim().toUpperCase(), s]));
+    const subjectCache = new Map<string, Subject[]>();
+    const toSave: ResultSaveRow[] = [];
+    const errors: string[] = [];
+
+    for (let i = 0; i < csvRows.length; i++) {
+      const r = csvRows[i];
+      const line = i + 2;
+      if (!r.admission && !r.subject) continue;
+      const student = byAdmission.get(r.admission.toUpperCase());
+      if (!student) { errors.push(`Line ${line}: admission no "${r.admission}" not found`); continue; }
+      if (!r.term) { errors.push(`Line ${line}: term not recognised — use 1st Term, 2nd Term or 3rd Term`); continue; }
+      if (!student.class_id) { errors.push(`Line ${line}: ${fullName(student)} has no class yet`); continue; }
+      if (!subjectCache.has(student.class_id)) {
+        subjectCache.set(student.class_id, await fetchSubjects(student.class_id));
+      }
+      const subj = subjectCache.get(student.class_id)!.find(
+        (s) => s.name.toLowerCase() === r.subject.toLowerCase()
+      );
+      if (!subj) { errors.push(`Line ${line}: subject "${r.subject}" not found in ${fullName(student)}'s class`); continue; }
+      const sc = scoresFromCsv(r);
+      if (!sc) { errors.push(`Line ${line}: no Test, Exam or Score value`); continue; }
+      toSave.push({
+        student_id: student.id, subject_id: subj.id, term: r.term, session,
+        test_score: sc.test, exam_score: sc.exam, score: sc.test + sc.exam,
+        entered_by: profile.id,
+      });
+    }
+
+    if (toSave.length > 0) {
+      const res = await saveResultRows(toSave);
+      if (res.error) {
+        setBusy(false);
+        setMsg({ type: "err", text: friendlyError(res.error) });
+        return;
+      }
+      if (res.degraded) errors.push("Scores were saved as totals only until the latest database update is run.");
+    }
+    setBusy(false);
+    setMsg({
+      type: toSave.length === 0 ? "err" : "ok",
+      text:
+        `Imported ${toSave.length} score(s) into ${session} report cards.` +
+        (errors.length
+          ? ` Issues: ${errors.slice(0, 5).join(" · ")}${errors.length > 5 ? ` · and ${errors.length - 5} more` : ""}`
+          : ""),
+    });
+    if (toSave.length > 0) { setCsvRows([]); setText(""); }
+  };
+
+  return (
+    <Modal title="Import Scores from CSV" onClose={onClose} wide>
+      <div className="space-y-4">
+        <Banner msg={msg} />
+        <p className="text-sm text-slate-500 leading-relaxed">
+          Prepare a spreadsheet with columns <b>Admission No, Subject, Term, Test, Exam</b> (a single
+          Score column also works). Each row goes straight into that student's report card for{" "}
+          <b>{session}</b>. Students are matched by admission number; subjects are matched within
+          the student's class.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={downloadTemplate} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
+            <Download className="w-4 h-4" /> Download Template
+          </button>
+          <label className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 cursor-pointer">
+            <Upload className="w-4 h-4" /> Upload CSV File
+            <input type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => onFile(e.target.files?.[0])} />
+          </label>
+        </div>
+        <Field label="…or paste CSV content here">
+          <textarea
+            className={fieldCls + " font-mono text-xs"}
+            rows={6}
+            value={text}
+            onChange={(e) => parse(e.target.value)}
+            placeholder={"Admission No,Subject,Term,Test,Exam\nEDN/25/1023,Mathematics,1st Term,35,58"}
+          />
+        </Field>
+
+        {csvRows.length > 0 && (
+          <>
+            <div className="overflow-x-auto border border-slate-100 rounded-lg">
+              <table className="w-full text-xs min-w-[520px]">
+                <thead>
+                  <tr className="text-left uppercase tracking-wide text-slate-400 border-b border-slate-100">
+                    <th className="py-2 px-3 font-semibold">Admission No</th>
+                    <th className="py-2 px-3 font-semibold">Subject</th>
+                    <th className="py-2 px-3 font-semibold">Term</th>
+                    <th className="py-2 px-3 font-semibold">Test</th>
+                    <th className="py-2 px-3 font-semibold">Exam</th>
+                    <th className="py-2 px-3 font-semibold">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {csvRows.slice(0, 10).map((r, i) => {
+                    const sc = scoresFromCsv(r);
+                    return (
+                      <tr key={i} className="border-b border-slate-50">
+                        <td className="py-1.5 px-3">{r.admission || "—"}</td>
+                        <td className="py-1.5 px-3">{r.subject || "—"}</td>
+                        <td className="py-1.5 px-3">{r.term || "?"}</td>
+                        <td className="py-1.5 px-3">{sc ? sc.test : "—"}</td>
+                        <td className="py-1.5 px-3">{sc ? sc.exam : "—"}</td>
+                        <td className="py-1.5 px-3 font-semibold">{sc ? sc.test + sc.exam : "—"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {csvRows.length > 10 && <p className="text-[11px] text-slate-400 px-3 py-2">Showing first 10 of {csvRows.length} rows…</p>}
+            </div>
+            <button
+              onClick={doImport}
+              disabled={busy}
+              className="inline-flex items-center gap-2 bg-[#0a4da8] hover:bg-[#083d86] disabled:opacity-70 text-white rounded-lg px-5 py-2.5 text-sm font-medium"
+            >
+              {busy ? <Spinner /> : <Upload className="w-4 h-4" />}
+              {busy ? "Importing…" : `Import ${csvRows.length} Row${csvRows.length === 1 ? "" : "s"}`}
+            </button>
+          </>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
 /* ------------------------------ Input Results ----------------------------- */
 export interface ScoreEntry {
   test: string;
@@ -205,7 +360,9 @@ function entryTotal(e: ScoreEntry): number | null {
 export function ResultsScreen({ profile }: { profile: Profile }) {
   const { classes } = useClasses();
   const [mode, setMode] = useState<"subject" | "student">("subject");
-  const [session, setSession] = useState(CURRENT_SESSION);
+  const { sessionNames, currentSession } = useSessions();
+  const [session, setSession] = useState("");
+  useEffect(() => { if (!session && currentSession) setSession(currentSession); }, [currentSession, session]);
   const [term, setTerm] = useState<string>(TERMS[0]);
   const [classId, setClassId] = useState("");
 
@@ -223,6 +380,7 @@ export function ResultsScreen({ profile }: { profile: Profile }) {
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [msg, setMsg] = useState<{ type: "err" | "ok"; text: string } | null>(null);
 
   // Class -> students + subjects
@@ -370,12 +528,19 @@ export function ResultsScreen({ profile }: { profile: Profile }) {
             <p className="text-xs text-slate-400 leading-relaxed">
               Test (CA) is over <b>{TEST_MAX}</b> · Exam is over <b>{EXAM_MAX}</b> · <b>Total = Test + Exam</b> (over 100) — the total is what appears on the report card.
             </p>
+            <button
+              type="button"
+              onClick={() => setShowImport(true)}
+              className="ml-auto inline-flex items-center gap-2 rounded-lg border border-[#0a4da8] text-[#0a4da8] hover:bg-blue-50 px-4 py-2.5 text-sm font-medium transition"
+            >
+              <Upload className="w-4 h-4" /> Import Scores (CSV)
+            </button>
           </div>
 
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <Field label="Session">
               <select className={fieldCls} value={session} onChange={(e) => setSession(e.target.value)}>
-                {SESSIONS.map((s) => <option key={s}>{s}</option>)}
+                {sessionNames.map((s) => <option key={s}>{s}</option>)}
               </select>
             </Field>
             <Field label="Term">
@@ -581,6 +746,14 @@ export function ResultsScreen({ profile }: { profile: Profile }) {
           </Card>
         )}
       </div>
+
+      {showImport && (
+        <ScoreImportModal
+          profile={profile}
+          session={session || currentSession}
+          onClose={() => setShowImport(false)}
+        />
+      )}
     </div>
   );
 }
@@ -608,7 +781,9 @@ function RatingPicker({ value, onChange }: { value: number; onChange: (v: number
 export function TraitsScreen({ profile }: { profile: Profile }) {
   const { classes } = useClasses();
   const isTeacherOnly = profile.role === "teacher";
-  const [session, setSession] = useState(CURRENT_SESSION);
+  const { sessionNames, currentSession } = useSessions();
+  const [session, setSession] = useState("");
+  useEffect(() => { if (!session && currentSession) setSession(currentSession); }, [currentSession, session]);
   const [classId, setClassId] = useState("");
   const [students, setStudents] = useState<Student[]>([]);
   const [studentId, setStudentId] = useState(() => sessionStorage.getItem("edana_traits_student") ?? "");
@@ -713,7 +888,7 @@ export function TraitsScreen({ profile }: { profile: Profile }) {
           <div className="grid sm:grid-cols-3 gap-4">
             <Field label="Session">
               <select className={fieldCls} value={session} onChange={(e) => setSession(e.target.value)}>
-                {SESSIONS.map((s) => <option key={s}>{s}</option>)}
+                {sessionNames.map((s) => <option key={s}>{s}</option>)}
               </select>
             </Field>
             <Field label="Class">
@@ -779,6 +954,7 @@ export interface SubjectRow {
 
 export function ReportCardView({
   student, classLabel, session, rows, overall, position, classSize, report, signatureUrl,
+  termFocus = TERMS[2], includedTerms = [...TERMS],
 }: {
   student: Student;
   classLabel: string;
@@ -789,6 +965,8 @@ export function ReportCardView({
   classSize: number | null;
   report: ReportMeta | null;
   signatureUrl?: string | null;
+  termFocus?: string;
+  includedTerms?: string[];
 }) {
   const avgGrade = overall !== null ? gradeOf(overall) : null;
   const cell = "border border-slate-300 px-2 py-1.5";
@@ -851,7 +1029,9 @@ export function ReportCardView({
           <h1 className="text-2xl font-extrabold tracking-wide text-[#0a4da8] mt-1">EDANA SCHOOLS</h1>
           <p className="text-xs tracking-[0.25em] uppercase text-slate-500">Raising to Greatness</p>
           <p className="mt-2 inline-block bg-[#0a4da8] text-white text-xs font-bold tracking-widest px-4 py-1 rounded-full">
-            TERMINAL REPORT CARD · {session} SESSION
+            {termFocus === TERMS[2]
+              ? `CUMULATIVE REPORT CARD · ${session} SESSION`
+              : `${termFocus.toUpperCase()} REPORT CARD · ${session} SESSION`}
           </p>
         </div>
         <div className="w-[92px] shrink-0 hidden sm:block" aria-hidden="true" />
@@ -903,29 +1083,34 @@ export function ReportCardView({
         <thead>
           <tr>
             <th className={th + " text-left"}>Subject</th>
-            <th className={th + " w-16 text-center"}>1st Term</th>
-            <th className={th + " w-16 text-center"}>2nd Term</th>
-            <th className={th + " w-16 text-center"}>3rd Term</th>
-            <th className={th + " w-14 text-center"}>Total</th>
-            <th className={th + " w-16 text-center"}>Average</th>
+            {includedTerms.map((t) => (
+              <th key={t} className={th + " w-16 text-center"}>{t}</th>
+            ))}
+            {includedTerms.length > 1 && <th className={th + " w-14 text-center"}>Total</th>}
+            {includedTerms.length > 1 && <th className={th + " w-16 text-center"}>Average</th>}
             <th className={th + " w-14 text-center"}>Grade</th>
             <th className={th + " w-24 text-left"}>Remark</th>
           </tr>
         </thead>
         <tbody>
           {rows.length === 0 && (
-            <tr><td colSpan={8} className={cell + " text-center text-slate-400 py-4"}>No results recorded yet for this session.</td></tr>
+            <tr><td colSpan={includedTerms.length + 3 + (includedTerms.length > 1 ? 2 : 0)} className={cell + " text-center text-slate-400 py-4"}>No results recorded yet for this session.</td></tr>
           )}
           {rows.map((r, i) => {
             const g = gradeOf(r.average);
+            const termValue = (t: string) => (t === TERMS[0] ? r.t1 : t === TERMS[1] ? r.t2 : r.t3);
             return (
               <tr key={r.name} className={i % 2 ? "bg-slate-50" : ""}>
                 <td className={cell}>{r.name}</td>
-                <td className={cell + " text-center"}>{r.t1 ?? "—"}</td>
-                <td className={cell + " text-center"}>{r.t2 ?? "—"}</td>
-                <td className={cell + " text-center"}>{r.t3 ?? "—"}</td>
-                <td className={cell + " text-center font-semibold"}>{r.hasScore ? r.total : "—"}</td>
-                <td className={cell + " text-center font-semibold"}>{r.hasScore ? Math.round(r.average) : "—"}</td>
+                {includedTerms.map((t) => (
+                  <td key={t} className={cell + " text-center"}>{termValue(t) ?? "—"}</td>
+                ))}
+                {includedTerms.length > 1 && (
+                  <td className={cell + " text-center font-semibold"}>{r.hasScore ? r.total : "—"}</td>
+                )}
+                {includedTerms.length > 1 && (
+                  <td className={cell + " text-center font-semibold"}>{r.hasScore ? Math.round(r.average) : "—"}</td>
+                )}
                 <td className={cell + ` text-center font-bold ${g.color}`}>{r.hasScore ? g.grade : "—"}</td>
                 <td className={cell}>{r.hasScore ? g.remark : "—"}</td>
               </tr>
@@ -994,7 +1179,13 @@ export function ReportCardView({
 export function ReportCardsScreen({ profile, go }: { profile: Profile; go: (p: PageKey) => void }) {
   const { classes } = useClasses();
   const staff = isStaffRole(profile.role);
-  const [session, setSession] = useState(CURRENT_SESSION);
+  const { sessionNames, currentSession } = useSessions();
+  const [session, setSession] = useState("");
+  useEffect(() => { if (!session && currentSession) setSession(currentSession); }, [currentSession, session]);
+  /** Which term's card to generate. 3rd Term = cumulative (includes 1st & 2nd term scores). */
+  const [termFocus, setTermFocus] = useState<string>(TERMS[2]);
+  const includedTerms: string[] =
+    termFocus === TERMS[0] ? [TERMS[0]] : termFocus === TERMS[1] ? [TERMS[0], TERMS[1]] : [...TERMS];
   const [classId, setClassId] = useState("");
   const [students, setStudents] = useState<Student[]>([]);
   const [selected, setSelected] = useState<Student | null>(null);
@@ -1009,6 +1200,11 @@ export function ReportCardsScreen({ profile, go }: { profile: Profile; go: (p: P
 
   // Arriving from the demo card / student list: open that student's card directly
   useEffect(() => {
+    const preselectTerm = sessionStorage.getItem("edana_report_term");
+    if (preselectTerm && (TERMS as readonly string[]).includes(preselectTerm)) {
+      setTermFocus(preselectTerm);
+    }
+    sessionStorage.removeItem("edana_report_term");
     const preselectId = sessionStorage.getItem("edana_report_student");
     if (!preselectId) return;
     sessionStorage.removeItem("edana_report_student");
@@ -1053,7 +1249,10 @@ export function ReportCardsScreen({ profile, go }: { profile: Profile; go: (p: P
           return found ? Number(found.score) : null;
         };
         const t1 = get(TERMS[0]); const t2 = get(TERMS[1]); const t3 = get(TERMS[2]);
-        const present = [t1, t2, t3].filter((v): v is number => v !== null);
+        const byTerm: Record<string, number | null> = { [TERMS[0]]: t1, [TERMS[1]]: t2, [TERMS[2]]: t3 };
+        const present = includedTerms
+          .map((t) => byTerm[t])
+          .filter((v): v is number => v !== null);
         const total = present.reduce((a, b) => a + b, 0);
         return {
           name: subj.name, t1, t2, t3,
@@ -1062,20 +1261,22 @@ export function ReportCardsScreen({ profile, go }: { profile: Profile; go: (p: P
         };
       });
       setRows(subjectRows);
-      setOverall(overallAverage(mine));
+      setOverall(overallAverage(mine.filter((r) => includedTerms.includes(r.term))));
 
       // Position within class (staff can see all classmates' results)
       if (staff && studentClassId) {
         const classmates = await fetchStudents(studentClassId);
         const ids = classmates.map((c) => c.id);
         const { data: classResults } = await supabase
-          .from("results").select("student_id, subject_id, score")
+          .from("results").select("student_id, subject_id, score, term")
           .in("student_id", ids).eq("session", session);
         const byStudent = new Map<string, { subject_id: string; score: number }[]>();
-        ((classResults ?? []) as { student_id: string; subject_id: string; score: number }[]).forEach((r) => {
-          const arr = byStudent.get(r.student_id) ?? [];
-          arr.push(r); byStudent.set(r.student_id, arr);
-        });
+        ((classResults ?? []) as { student_id: string; subject_id: string; score: number; term: string }[])
+          .filter((r) => includedTerms.includes(r.term))
+          .forEach((r) => {
+            const arr = byStudent.get(r.student_id) ?? [];
+            arr.push(r); byStudent.set(r.student_id, arr);
+          });
         const averages = new Map<string, number>();
         byStudent.forEach((rs, sid) => {
           const avg = overallAverage(rs);
@@ -1083,7 +1284,6 @@ export function ReportCardsScreen({ profile, go }: { profile: Profile; go: (p: P
         });
         const ranks = rankMap(averages);
         setPosition(ranks.get(selected.id) ?? null);
-        setStudents((prev) => prev); // no-op keep
       } else {
         setPosition(null);
       }
@@ -1094,7 +1294,7 @@ export function ReportCardsScreen({ profile, go }: { profile: Profile; go: (p: P
       setReport((rep as ReportMeta) ?? null);
       setLoadingCard(false);
     })();
-  }, [selected, session, staff]);
+  }, [selected, session, staff, termFocus]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (selected) {
     return (
@@ -1104,6 +1304,16 @@ export function ReportCardsScreen({ profile, go }: { profile: Profile; go: (p: P
             <ArrowLeft className="w-4 h-4" /> Back
           </button>
           <span className="font-semibold text-slate-800 mr-auto">{fullName(selected)} — {className(classes, selected.class_id)}</span>
+          <select
+            className="rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-[#0a4da8]"
+            value={termFocus}
+            onChange={(e) => setTermFocus(e.target.value)}
+            aria-label="Report type"
+          >
+            {TERMS.map((t) => (
+              <option key={t} value={t}>{t === TERMS[2] ? "3rd Term (Cumulative)" : `${t} Report`}</option>
+            ))}
+          </select>
           {staff && (
             <button
               onClick={() => { sessionStorage.setItem("edana_traits_student", selected.id); go("traits"); }}
@@ -1129,6 +1339,8 @@ export function ReportCardsScreen({ profile, go }: { profile: Profile; go: (p: P
             classSize={staff ? students.length || null : null}
             report={report}
             signatureUrl={signatureUrl}
+            termFocus={termFocus}
+            includedTerms={includedTerms}
           />
         )}
       </div>
@@ -1140,10 +1352,17 @@ export function ReportCardsScreen({ profile, go }: { profile: Profile; go: (p: P
       <PageHeader title="Report Cards" subtitle={staff ? "Select a student to view and print their terminal report card" : "Your children's terminal report cards"} />
       <div className="space-y-4">
         <Card className="p-5">
-          <div className="grid sm:grid-cols-2 gap-4 max-w-2xl">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 max-w-3xl">
             <Field label="Session">
               <select className={fieldCls} value={session} onChange={(e) => setSession(e.target.value)}>
-                {SESSIONS.map((s) => <option key={s}>{s}</option>)}
+                {sessionNames.map((s) => <option key={s}>{s}</option>)}
+              </select>
+            </Field>
+            <Field label="Report Type">
+              <select className={fieldCls} value={termFocus} onChange={(e) => setTermFocus(e.target.value)}>
+                {TERMS.map((t) => (
+                  <option key={t} value={t}>{t === TERMS[2] ? "3rd Term (Cumulative — all terms)" : `${t} Report`}</option>
+                ))}
               </select>
             </Field>
             {staff && (
@@ -1155,6 +1374,10 @@ export function ReportCardsScreen({ profile, go }: { profile: Profile; go: (p: P
               </Field>
             )}
           </div>
+          <p className="text-xs text-slate-400 mt-3">
+            The <b>3rd Term (Cumulative)</b> report card includes the 1st and 2nd term scores with totals,
+            averages and class position — as in your school's format.
+          </p>
         </Card>
 
         {staff && !classId ? (
@@ -1173,7 +1396,7 @@ export function ReportCardsScreen({ profile, go }: { profile: Profile; go: (p: P
                   </div>
                 </div>
                 <p className="mt-3 text-xs font-medium text-[#0a4da8] flex items-center gap-1">
-                  <Check className="w-3.5 h-3.5" /> View {session} Report Card
+                  <Check className="w-3.5 h-3.5" /> View {termFocus} Report · {session}
                 </p>
               </button>
             ))}

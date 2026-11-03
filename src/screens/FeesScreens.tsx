@@ -6,8 +6,8 @@ import {
 import { supabase } from "../supabase";
 import type { Profile, Student, FeeItem, Payment } from "../types";
 import { VERIFIED_STATUSES } from "../types";
-import { TERMS, SESSIONS, CURRENT_SESSION, formatMoney, generateReference, fullName } from "../lib/school";
-import { useClasses, className, fetchStudents, fetchMyChildren } from "../lib/data";
+import { TERMS, formatMoney, generateReference, fullName } from "../lib/school";
+import { useClasses, className, fetchStudents, fetchMyChildren, useSessions } from "../lib/data";
 import {
   PageHeader, Card, Banner, Spinner, Field, fieldCls,
   Avatar, EmptyState, friendlyError, StatCard,
@@ -57,7 +57,9 @@ export function StatusBadge({ status }: { status: string }) {
 /* ------------------------- Finance (Bursary/Admin) ------------------------- */
 function FinanceFees({ profile }: { profile: Profile }) {
   const { classes } = useClasses();
-  const [session, setSession] = useState(CURRENT_SESSION);
+  const { sessionNames, currentSession } = useSessions();
+  const [session, setSession] = useState("");
+  useEffect(() => { if (!session && currentSession) setSession(currentSession); }, [currentSession, session]);
   const [items, setItems] = useState<FeeItem[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
@@ -238,7 +240,7 @@ function FinanceFees({ profile }: { profile: Profile }) {
               {sendingNotice ? "Sending…" : "Send Fees to Parents"}
             </button>
             <select className={fieldCls + " w-44"} value={session} onChange={(e) => setSession(e.target.value)}>
-              {SESSIONS.map((s) => <option key={s}>{s}</option>)}
+              {sessionNames.map((s) => <option key={s}>{s}</option>)}
             </select>
           </>
         }
@@ -429,7 +431,9 @@ function FinanceFees({ profile }: { profile: Profile }) {
 /* ---------------------------------- Parent --------------------------------- */
 function ParentFees({ profile }: { profile: Profile }) {
   const { classes } = useClasses();
-  const [session, setSession] = useState(CURRENT_SESSION);
+  const { sessionNames, currentSession } = useSessions();
+  const [session, setSession] = useState("");
+  useEffect(() => { if (!session && currentSession) setSession(currentSession); }, [currentSession, session]);
   const [children, setChildren] = useState<Student[]>([]);
   const [items, setItems] = useState<FeeItem[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
@@ -471,7 +475,7 @@ function ParentFees({ profile }: { profile: Profile }) {
         subtitle="View your children's school fees and pay online"
         actions={
           <select className={fieldCls + " w-44"} value={session} onChange={(e) => setSession(e.target.value)}>
-            {SESSIONS.map((s) => <option key={s}>{s}</option>)}
+            {sessionNames.map((s) => <option key={s}>{s}</option>)}
           </select>
         }
       />

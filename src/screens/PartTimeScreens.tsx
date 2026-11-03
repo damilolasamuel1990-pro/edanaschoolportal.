@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
-import { BookOpen, Save, Eye, Users } from "lucide-react";
+import { BookOpen, Save, Eye, Users, Upload, Download } from "lucide-react";
 import { supabase } from "../supabase";
 import type { Profile, Student, Subject, ResultRow } from "../types";
 import {
-  TERMS, SESSIONS, CURRENT_SESSION, TEST_MAX, EXAM_MAX,
-  gradeOf, splitScore, fullName,
+  TERMS, TEST_MAX, EXAM_MAX,
+  gradeOf, splitScore, fullName, parseScoreCSV, scoresFromCsv, PARTTIME_SCORE_CSV_TEMPLATE,
 } from "../lib/school";
-import { useClasses, className, fetchStudents, saveResultRows } from "../lib/data";
+import { useClasses, className, fetchStudents, saveResultRows, useSessions, type ResultSaveRow } from "../lib/data";
 import {
   PageHeader, Card, Banner, Spinner, Field, fieldCls,
   Avatar, EmptyState, Modal, friendlyError,
@@ -39,6 +39,143 @@ interface MySubject extends Subject {
   studentCount: number;
 }
 
+/** Part-time staff: import Test/Exam scores for their subject from a CSV file. */
+function PartTimeImportModal({
+  profile, subjectId, subjectName, session, term, roster, onClose, onImported,
+}: {
+  profile: Profile;
+  subjectId: string;
+  subjectName: string;
+  session: string;
+  term: string;
+  roster: Student[];
+  onClose: () => void;
+  onImported: () => void;
+}) {
+  const [text, setText] = useState("");
+  const [csvRows, setCsvRows] = useState<ReturnType<typeof parseScoreCSV>>([]);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ type: "err" | "ok"; text: string } | null>(null);
+
+  const parse = (value: string) => { setText(value); setCsvRows(parseScoreCSV(value)); };
+  const onFile = async (file: File | undefined) => { if (file) parse(await file.text()); };
+
+  const downloadTemplate = () => {
+    const blob = new Blob([PARTTIME_SCORE_CSV_TEMPLATE], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "edana-my-subject-scores-template.csv"; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const doImport = async () => {
+    setBusy(true); setMsg(null);
+    const byAdmission = new Map(roster.map((s) => [s.admission_no.trim().toUpperCase(), s]));
+    const toSave: ResultSaveRow[] = [];
+    const errors: string[] = [];
+    for (let i = 0; i < csvRows.length; i++) {
+      const r = csvRows[i];
+      const line = i + 2;
+      if (!r.admission) continue;
+      const student = byAdmission.get(r.admission.toUpperCase());
+      if (!student) { errors.push(`Line ${line}: "${r.admission}" is not a student offering this subject`); continue; }
+      const sc = scoresFromCsv(r);
+      if (!sc) { errors.push(`Line ${line}: no Test, Exam or Score value`); continue; }
+      toSave.push({
+        student_id: student.id, subject_id: subjectId, term, session,
+        test_score: sc.test, exam_score: sc.exam, score: sc.test + sc.exam,
+        entered_by: profile.id,
+      });
+    }
+    if (toSave.length > 0) {
+      const res = await saveResultRows(toSave);
+      if (res.error) {
+        setBusy(false);
+        setMsg({ type: "err", text: friendlyError(res.error) });
+        return;
+      }
+      if (res.degraded) errors.push("Saved as totals only until the latest database update is run.");
+    }
+    setBusy(false);
+    setMsg({
+      type: toSave.length === 0 ? "err" : "ok",
+      text:
+        `Imported ${toSave.length} score(s) for ${subjectName}, ${term}, ${session}. The class teacher can see them in the class report cards.` +
+        (errors.length ? ` Issues: ${errors.slice(0, 4).join(" · ")}` : ""),
+    });
+    if (toSave.length > 0) { setCsvRows([]); setText(""); onImported(); }
+  };
+
+  return (
+    <Modal title={`Import Scores — ${subjectName}`} onClose={onClose} wide>
+      <div className="space-y-4">
+        <Banner msg={msg} />
+        <p className="text-sm text-slate-500 leading-relaxed">
+          For <b>{subjectName}</b> · <b>{term}</b> · <b>{session}</b>. Prepare a spreadsheet with columns{" "}
+          <b>Admission No, Test, Exam</b> (a single Score column also works) — one row per student offering
+          this subject. Scores go straight into their report cards, where the class teacher can see them.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={downloadTemplate} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
+            <Download className="w-4 h-4" /> Download Template
+          </button>
+          <label className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 cursor-pointer">
+            <Upload className="w-4 h-4" /> Upload CSV File
+            <input type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => onFile(e.target.files?.[0])} />
+          </label>
+        </div>
+        <Field label="…or paste CSV content here">
+          <textarea
+            className={fieldCls + " font-mono text-xs"}
+            rows={6}
+            value={text}
+            onChange={(e) => parse(e.target.value)}
+            placeholder={"Admission No,Test,Exam\nEDN/25/1023,35,58"}
+          />
+        </Field>
+        {csvRows.length > 0 && (
+          <>
+            <div className="overflow-x-auto border border-slate-100 rounded-lg">
+              <table className="w-full text-xs min-w-[440px]">
+                <thead>
+                  <tr className="text-left uppercase tracking-wide text-slate-400 border-b border-slate-100">
+                    <th className="py-2 px-3 font-semibold">Admission No</th>
+                    <th className="py-2 px-3 font-semibold">Test</th>
+                    <th className="py-2 px-3 font-semibold">Exam</th>
+                    <th className="py-2 px-3 font-semibold">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {csvRows.slice(0, 10).map((r, i) => {
+                    const sc = scoresFromCsv(r);
+                    return (
+                      <tr key={i} className="border-b border-slate-50">
+                        <td className="py-1.5 px-3">{r.admission || "—"}</td>
+                        <td className="py-1.5 px-3">{sc ? sc.test : "—"}</td>
+                        <td className="py-1.5 px-3">{sc ? sc.exam : "—"}</td>
+                        <td className="py-1.5 px-3 font-semibold">{sc ? sc.test + sc.exam : "—"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {csvRows.length > 10 && <p className="text-[11px] text-slate-400 px-3 py-2">Showing first 10 of {csvRows.length} rows…</p>}
+            </div>
+            <button
+              onClick={doImport}
+              disabled={busy}
+              className="inline-flex items-center gap-2 bg-[#0a4da8] hover:bg-[#083d86] disabled:opacity-70 text-white rounded-lg px-5 py-2.5 text-sm font-medium"
+            >
+              {busy ? <Spinner /> : <Upload className="w-4 h-4" />}
+              {busy ? "Importing…" : `Import ${csvRows.length} Row${csvRows.length === 1 ? "" : "s"}`}
+            </button>
+          </>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
 /**
  * Part-time staff workspace: they only see students offering THEIR subject,
  * and can enter Test/Exam scores for those students.
@@ -47,12 +184,16 @@ export function PartTimeSubjectsScreen({ profile }: { profile: Profile }) {
   const { classes } = useClasses();
   const [mySubjects, setMySubjects] = useState<MySubject[]>([]);
   const [subjectId, setSubjectId] = useState("");
-  const [session, setSession] = useState(CURRENT_SESSION);
+  const { sessionNames, currentSession } = useSessions();
+  const [session, setSession] = useState("");
+  useEffect(() => { if (!session && currentSession) setSession(currentSession); }, [currentSession, session]);
   const [term, setTerm] = useState<string>(TERMS[0]);
   const [roster, setRoster] = useState<Student[]>([]);
   const [entries, setEntries] = useState<Record<string, ScoreEntry>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [msg, setMsg] = useState<{ type: "err" | "ok"; text: string } | null>(null);
   const [viewing, setViewing] = useState<Student | null>(null);
 
@@ -109,7 +250,7 @@ export function PartTimeSubjectsScreen({ profile }: { profile: Profile }) {
       setEntries(map);
       setLoading(false);
     })();
-  }, [subjectId, term, session]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [subjectId, term, session, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = async () => {
     if (!selectedSubject) return;
@@ -198,7 +339,7 @@ export function PartTimeSubjectsScreen({ profile }: { profile: Profile }) {
               <div className="grid sm:grid-cols-3 gap-4 max-w-2xl">
                 <Field label="Session">
                   <select className={fieldCls} value={session} onChange={(e) => setSession(e.target.value)}>
-                    {SESSIONS.map((s) => <option key={s}>{s}</option>)}
+                    {sessionNames.map((s) => <option key={s}>{s}</option>)}
                   </select>
                 </Field>
                 <Field label="Term">
@@ -226,6 +367,9 @@ export function PartTimeSubjectsScreen({ profile }: { profile: Profile }) {
                   {selectedSubject?.name} · {selectedSubject ? className(classes, selectedSubject.class_id) : ""} · {term}
                 </h3>
                 <span className="text-xs text-slate-500">{enteredCount} of {roster.length} entered</span>
+                <button onClick={() => setShowImport(true)} className="inline-flex items-center gap-2 rounded-lg border border-[#0a4da8] text-[#0a4da8] hover:bg-blue-50 px-4 py-2.5 text-sm font-medium">
+                  <Upload className="w-4 h-4" /> Import CSV
+                </button>
                 <button onClick={save} disabled={saving || loading} className="inline-flex items-center gap-2 bg-[#0a4da8] hover:bg-[#083d86] disabled:opacity-70 text-white rounded-lg px-4 py-2.5 text-sm font-medium">
                   {saving ? <Spinner /> : <Save className="w-4 h-4" />} {saving ? "Saving…" : "Save Scores"}
                 </button>
@@ -331,6 +475,19 @@ export function PartTimeSubjectsScreen({ profile }: { profile: Profile }) {
             The class teacher sees these scores in the class results and report cards.
           </p>
         </Modal>
+      )}
+
+      {showImport && selectedSubject && (
+        <PartTimeImportModal
+          profile={profile}
+          subjectId={selectedSubject.id}
+          subjectName={selectedSubject.name}
+          session={session || currentSession}
+          term={term}
+          roster={roster}
+          onClose={() => setShowImport(false)}
+          onImported={() => setRefreshKey((k) => k + 1)}
+        />
       )}
     </div>
   );

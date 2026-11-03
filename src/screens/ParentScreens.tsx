@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { FileText, CalendarCheck, Wallet } from "lucide-react";
 import type { Profile, Student } from "../types";
-import { CURRENT_SESSION, formatMoney } from "../lib/school";
-import { useClasses, className, fetchMyChildren, overallAverage } from "../lib/data";
+import { formatMoney } from "../lib/school";
+import { useClasses, className, fetchMyChildren, overallAverage, useSessions } from "../lib/data";
 import { supabase } from "../supabase";
 import { PageHeader, Card, StudentAvatar, Spinner, EmptyState } from "../components/ui";
 import type { PageKey } from "../layout/DashboardLayout";
@@ -15,6 +15,7 @@ interface ChildStats {
 
 export function ChildrenScreen({ profile, go }: { profile: Profile; go: (p: PageKey) => void }) {
   const { classes } = useClasses();
+  const { currentSession } = useSessions();
   const [children, setChildren] = useState<Student[]>([]);
   const [stats, setStats] = useState<Record<string, ChildStats>>({});
   const [loading, setLoading] = useState(true);
@@ -26,9 +27,9 @@ export function ChildrenScreen({ profile, go }: { profile: Profile; go: (p: Page
       const map: Record<string, ChildStats> = {};
       for (const kid of kids) {
         const [{ data: results }, { data: att }, { data: feeItems }, { data: pays }] = await Promise.all([
-          supabase.from("results").select("subject_id, score").eq("student_id", kid.id).eq("session", CURRENT_SESSION),
+          supabase.from("results").select("subject_id, score").eq("student_id", kid.id).eq("session", currentSession),
           supabase.from("attendance").select("status").eq("student_id", kid.id),
-          supabase.from("fee_items").select("amount, class_id").eq("session", CURRENT_SESSION),
+          supabase.from("fee_items").select("amount, class_id").eq("session", currentSession),
           supabase.from("payments").select("amount, status").eq("student_id", kid.id),
         ]);
         const attRows = (att ?? []) as { status: string }[];
@@ -48,7 +49,7 @@ export function ChildrenScreen({ profile, go }: { profile: Profile; go: (p: Page
       setStats(map);
       setLoading(false);
     })();
-  }, [profile.id]);
+  }, [profile.id, currentSession]);
 
   return (
     <div>

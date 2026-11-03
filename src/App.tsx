@@ -26,7 +26,7 @@ const PORTAL_ROLES = ["super_admin", "admin", "teacher", "part_time", "bursary",
  *  sends the user to the setup screen (with the SQL script) if any are missing. */
 const REQUIRED_TABLES = [
   "classes", "students", "subjects", "student_subjects", "results",
-  "reports", "attendance", "fee_items", "payments", "notices", "staff_subjects",
+  "reports", "attendance", "fee_items", "payments", "notices", "staff_subjects", "sessions",
 ];
 
 function isMissingTableError(error: { code?: string; message: string }): boolean {

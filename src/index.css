@@ -1,7 +1,12 @@
 @import "tailwindcss";
 
-/* Print only the report card when printing from the Report Cards page */
+/* Print only the report card when printing from the Report Cards page,
+   compacted so it fits on a single A4 page. */
 @media print {
+  @page {
+    size: A4;
+    margin: 7mm;
+  }
   body * {
     visibility: hidden;
   }
@@ -16,5 +21,16 @@
     width: 100%;
     border: none !important;
     box-shadow: none !important;
+    padding: 10px !important;
+    font-size: 10.5px !important;
+    line-height: 1.3 !important;
+    page-break-inside: avoid;
+  }
+  #report-print table td,
+  #report-print table th {
+    padding: 2.5px 5px !important;
+  }
+  #report-print h1 {
+    font-size: 18px !important;
   }
 }

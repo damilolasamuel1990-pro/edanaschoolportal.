@@ -367,9 +367,11 @@ export function DemoStudentCard({
     onChanged();
   };
 
-  const viewReport = () => {
+  const viewReport = (term?: string) => {
     if (!demo) return;
     sessionStorage.setItem("edana_report_student", demo.id);
+    if (term) sessionStorage.setItem("edana_report_term", term);
+    else sessionStorage.removeItem("edana_report_term");
     go("reportcards");
   };
 
@@ -397,9 +399,18 @@ export function DemoStudentCard({
             <span className="inline-flex items-center gap-2 rounded-full bg-amber-100 border border-amber-200 text-amber-800 px-3 py-1.5 text-sm font-medium">
               Demo: {demo.first_name} {demo.last_name} · {className(classes, demo.class_id)} · {demo.admission_no}
             </span>
-            <button onClick={viewReport} className="inline-flex items-center gap-2 bg-[#0a4da8] hover:bg-[#083d86] text-white rounded-lg px-4 py-2 text-sm font-medium">
+            <button onClick={() => viewReport()} className="inline-flex items-center gap-2 bg-[#0a4da8] hover:bg-[#083d86] text-white rounded-lg px-4 py-2 text-sm font-medium">
               <FileText className="w-4 h-4" /> View Demo Report Card
             </button>
+            {TERMS.map((t) => (
+              <button
+                key={t}
+                onClick={() => viewReport(t)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-[#0a4da8]/40 text-[#0a4da8] hover:bg-blue-50 px-3 py-2 text-xs font-medium"
+              >
+                {t} Card
+              </button>
+            ))}
             <button onClick={deleteDemo} disabled={busy} className="inline-flex items-center gap-2 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-60 px-4 py-2 text-sm font-medium">
               {busy ? <Spinner /> : <Trash2 className="w-4 h-4" />} Delete Demo Student
             </button>

@@ -1,5 +1,5 @@
 -- ============================================================
--- Edana Schools - Supabase setup v11 (self-healing + repair)
+-- Edana Schools - Supabase setup v12 (self-healing + repair)
 -- Supabase dashboard -> SQL Editor -> New query -> paste -> Run
 -- Safe to run again and again. It repairs tables whose id was
 -- created as text/integer instead of uuid, creates missing
@@ -318,6 +318,25 @@ alter table public.notices add column if not exists created_at timestamptz not n
 alter table public.notices alter column id set default gen_random_uuid();
 alter table public.notices enable row level security;
 
+-- ---------- 9b) Academic sessions (managed by the Super Admin) ----------
+create table if not exists public.sessions (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  is_current boolean not null default false,
+  created_at timestamptz not null default now()
+);
+alter table public.sessions add column if not exists name text;
+alter table public.sessions add column if not exists is_current boolean not null default false;
+alter table public.sessions add column if not exists created_at timestamptz not null default now();
+alter table public.sessions alter column id set default gen_random_uuid();
+alter table public.sessions enable row level security;
+
+insert into public.sessions (name, is_current) values
+  ('2023/2024', false), ('2024/2025', false), ('2025/2026', false), ('2026/2027', false)
+on conflict (name) do nothing;
+update public.sessions set is_current = true
+where name = '2025/2026' and not exists (select 1 from public.sessions where is_current);
+
 -- ---------- 10) Unique indexes (needed by the app; added safely) ----------
 -- Remove duplicate class names first (keeps the oldest row) so the unique index can be built:
 do $$ begin
@@ -567,6 +586,13 @@ create policy "notices_select" on public.notices for select to authenticated usi
 drop policy if exists "notices_write" on public.notices;
 create policy "notices_write" on public.notices for all to authenticated
   using (public.is_finance()) with check (public.is_finance());
+
+-- Sessions: everyone signed in can view; ONLY the Super Admin manages them
+drop policy if exists "sessions_select" on public.sessions;
+create policy "sessions_select" on public.sessions for select to authenticated using (true);
+drop policy if exists "sessions_write" on public.sessions;
+create policy "sessions_write" on public.sessions for all to authenticated
+  using (public.is_super_admin()) with check (public.is_super_admin());
 
 -- ---------- 14) Storage bucket for payment proofs (receipts: images/PDFs) ----------
 insert into storage.buckets (id, name, public)

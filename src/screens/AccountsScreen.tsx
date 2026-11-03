@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { User } from "@supabase/supabase-js";
 import {
   Users, UserPlus, RefreshCw, Eye, EyeOff, Copy, Check, Trash2, Dices, Info,
+  CalendarDays, Plus, Star,
 } from "lucide-react";
+import { fetchSessionRows, type SessionRow } from "../lib/data";
 import { supabase, createEphemeralClient } from "../supabase";
 import type { Profile, Role } from "../types";
 import { CREATABLE_ROLES, ROLE_LABELS } from "../types";
@@ -300,6 +302,171 @@ export default function AccountsScreen({ me }: { me: User }) {
           </p>
         </Card>
       </div>
+
+      <SessionsSection />
     </div>
+  );
+}
+
+/* ------------------------- Academic Sessions (Super Admin) ------------------------- */
+function SessionsSection() {
+  const [rows, setRows] = useState<SessionRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ type: "err" | "ok"; text: string } | null>(null);
+
+  const load = async () => {
+    setRows(await fetchSessionRows());
+    setLoading(false);
+  };
+  useEffect(() => { load(); }, []);
+
+  const current = rows.find((r) => r.is_current);
+
+  const nextSessionName = (): string => {
+    if (rows.length === 0) return "2026/2027";
+    const years = rows
+      .map((r) => parseInt(r.name.split("/")[0], 10))
+      .filter((y) => !isNaN(y));
+    const max = years.length ? Math.max(...years) : 2025;
+    return `${max + 1}/${max + 2}`;
+  };
+
+  const addSession = async (sessionName: string) => {
+    const clean = sessionName.trim();
+    const match = clean.match(/^(\d{4})\/(\d{4})$/);
+    if (!match) {
+      setMsg({ type: "err", text: "Session must look like 2027/2028 — four digits, a slash, four digits." });
+      return;
+    }
+    if (parseInt(match[2], 10) !== parseInt(match[1], 10) + 1) {
+      setMsg({ type: "err", text: `The second year must be one more than the first — did you mean ${match[1]}/${parseInt(match[1], 10) + 1}?` });
+      return;
+    }
+    setBusy(true); setMsg(null);
+    const { error } = await supabase.from("sessions").insert({
+      name: clean,
+      is_current: rows.length === 0,
+    });
+    setBusy(false);
+    if (error) { setMsg({ type: "err", text: friendlyError(error.message) }); return; }
+    setName("");
+    setMsg({ type: "ok", text: `Session ${clean} added. It now appears in every session dropdown (results, fees, report cards).` });
+    load();
+  };
+
+  const setCurrent = async (row: SessionRow) => {
+    setBusy(true); setMsg(null);
+    const { error: clearError } = await supabase
+      .from("sessions")
+      .update({ is_current: false })
+      .neq("id", row.id);
+    if (clearError) { setBusy(false); setMsg({ type: "err", text: friendlyError(clearError.message) }); return; }
+    const { error } = await supabase.from("sessions").update({ is_current: true }).eq("id", row.id);
+    setBusy(false);
+    if (error) { setMsg({ type: "err", text: friendlyError(error.message) }); return; }
+    setMsg({ type: "ok", text: `${row.name} is now the current session — it will be selected by default everywhere.` });
+    load();
+  };
+
+  const removeSession = async (row: SessionRow) => {
+    if (row.is_current) {
+      setMsg({ type: "err", text: "That's the current session. Set another session as current first, then delete it." });
+      return;
+    }
+    if (!window.confirm(`Delete the ${row.name} session from the list? (Results and fees already recorded under it are not deleted.)`)) return;
+    setBusy(true); setMsg(null);
+    const { error } = await supabase.from("sessions").delete().eq("id", row.id);
+    setBusy(false);
+    if (error) { setMsg({ type: "err", text: friendlyError(error.message) }); return; }
+    setMsg({ type: "ok", text: `Session ${row.name} removed.` });
+    load();
+  };
+
+  return (
+    <Card className="p-6 mt-4">
+      <h2 className="flex items-center gap-2 font-bold text-slate-900">
+        <CalendarDays className="w-5 h-5 text-[#0a4da8]" /> Academic Sessions
+      </h2>
+      <p className="text-[13px] text-slate-500 mt-1 leading-relaxed">
+        Only you, the Super Admin, can manage sessions. The <b>current session</b> is selected by
+        default in results, fees and report cards across the whole portal.
+      </p>
+
+      <div className="mt-5 space-y-4">
+        <Banner msg={msg} />
+
+        <form
+          onSubmit={(e) => { e.preventDefault(); addSession(name); }}
+          className="flex flex-wrap items-end gap-3"
+        >
+          <div className="w-56">
+            <Field label="New Session">
+              <input
+                className={fieldCls}
+                placeholder="e.g. 2027/2028"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </Field>
+          </div>
+          <button
+            disabled={busy}
+            className="inline-flex items-center gap-2 bg-[#0a4da8] hover:bg-[#083d86] disabled:opacity-70 text-white rounded-lg px-4 py-2.5 text-sm font-medium"
+          >
+            {busy ? <Spinner /> : <Plus className="w-4 h-4" />} Add Session
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => addSession(nextSessionName())}
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+          >
+            <Plus className="w-4 h-4" /> Add {nextSessionName()}
+          </button>
+        </form>
+
+        {loading ? (
+          <div className="py-8 flex justify-center text-[#0a4da8]"><Spinner className="w-6 h-6" /></div>
+        ) : rows.length === 0 ? (
+          <EmptyState text="No sessions yet. Add your first session above." />
+        ) : (
+          <ul className="divide-y divide-slate-50">
+            {rows.map((r) => (
+              <li key={r.id} className="flex flex-wrap items-center gap-3 py-3">
+                <span className="font-semibold text-slate-800 mr-auto">{r.name}</span>
+                {r.is_current ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-800 border border-amber-200 px-2.5 py-0.5 text-xs font-semibold">
+                    <Star className="w-3 h-3" /> Current Session
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => setCurrent(r)}
+                    disabled={busy}
+                    className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:border-[#0a4da8] hover:text-[#0a4da8] disabled:opacity-60"
+                  >
+                    Set as Current
+                  </button>
+                )}
+                <button
+                  onClick={() => removeSession(r)}
+                  disabled={busy}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:text-red-600 hover:bg-red-50 disabled:opacity-40"
+                  title={r.is_current ? "Current session can't be deleted" : `Delete ${r.name}`}
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {current && (
+          <p className="text-xs text-slate-400">
+            Current session: <b className="text-slate-600">{current.name}</b> — new results, fees and report cards default to it.
+          </p>
+        )}
+      </div>
+    </Card>
   );
 }

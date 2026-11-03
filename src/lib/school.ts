@@ -168,3 +168,61 @@ export const CSV_TEMPLATE =
   "First Name,Last Name,Gender,Class,Date of Birth,Guardian Name,Guardian Phone,Guardian Email,Address\n" +
   "Adaeze,Okafor,Female,Basic 4,2016-05-14,Mrs Okafor,08031234567,okafor@example.com,\"12 Allen Avenue, Ikeja\"\n" +
   "Tunde,Bakare,Male,JSS 1,2013-09-02,Mr Bakare,08059876543,bakare@example.com,\"4 Adeola Street, Lagos\"";
+
+/* --------------------------- Score CSV import ----------------------------- */
+export interface ScoreCsvRow {
+  admission: string;
+  subject: string;
+  term: string;
+  test: string;
+  exam: string;
+  score: string;
+}
+
+/** Normalise "1st", "First Term", "Term 1" etc. to "1st Term" style values. */
+export function normalizeTerm(raw: string): string {
+  const t = (raw || "").toLowerCase();
+  if (t.includes("1") || t.includes("first")) return "1st Term";
+  if (t.includes("2") || t.includes("second")) return "2nd Term";
+  if (t.includes("3") || t.includes("third")) return "3rd Term";
+  return "";
+}
+
+/**
+ * Parse a scores CSV. Expected columns (any order):
+ * Admission No, Subject, Term, Test, Exam  (a single Score/Total column also works).
+ */
+export function parseScoreCSV(text: string): ScoreCsvRow[] {
+  return parseCSV(text).map((r) => ({
+    admission: (r["admissionno"] || r["admission"] || r["admno"] || r["admissionnumber"] || "").trim(),
+    subject: (r["subject"] || r["subjectname"] || "").trim(),
+    term: normalizeTerm(r["term"] || ""),
+    test: (r["test"] || r["ca"] || r["testscore"] || "").trim(),
+    exam: (r["exam"] || r["examscore"] || "").trim(),
+    score: (r["score"] || r["total"] || "").trim(),
+  }));
+}
+
+/** Work out the Test/Exam pair from a CSV row (falls back to splitting a total). */
+export function scoresFromCsv(r: ScoreCsvRow): { test: number; exam: number } | null {
+  const hasTest = r.test !== "";
+  const hasExam = r.exam !== "";
+  if (hasTest || hasExam) {
+    const test = hasTest ? Math.max(0, Math.min(TEST_MAX, Number(r.test) || 0)) : 0;
+    const exam = hasExam ? Math.max(0, Math.min(EXAM_MAX, Number(r.exam) || 0)) : 0;
+    return { test, exam };
+  }
+  if (r.score !== "" && !isNaN(Number(r.score))) return splitScore(Number(r.score));
+  return null;
+}
+
+export const SCORE_CSV_TEMPLATE =
+  "Admission No,Subject,Term,Test,Exam\n" +
+  "EDN/25/1023,Mathematics,1st Term,35,58\n" +
+  "EDN/25/1023,English,2nd Term,38,60\n" +
+  "EDN/25/1024,Mathematics,1st Term,30,52";
+
+export const PARTTIME_SCORE_CSV_TEMPLATE =
+  "Admission No,Test,Exam\n" +
+  "EDN/25/1023,35,58\n" +
+  "EDN/25/1024,30,52";
